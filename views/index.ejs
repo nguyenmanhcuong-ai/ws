@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebSocket Chat</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    /* Style the buttons within the edit-delete-buttons class */
+    .edit-delete-buttons button {
+      font-size: smaller;
+      font-style: italic;
+      margin-left: 5px;
+      cursor: pointer;
+      background: none; /* Remove the background color */
+      border: none; /* Remove the border */
+      padding: 0; /* Remove padding */
+      color: inherit; /* Inherit the text color from the parent element */
+    }
+  
+    .edit-delete-buttons button:hover {
+      text-decoration: underline;
+      color: rgb(140, 140, 140);
+    }
+  
+    /* Add a class for the message container */
+    .message-container {
+      position: relative;
+    }
+  
+    /* Add a class for the edit and delete buttons */
+    .edit-delete-buttons {
+      position: absolute;
+      top: 0;
+      right: 0;
+      font-style: italic;
+    }
+  </style>
+    </style>
+</head>
+<body>
+  <div id="name-container">
+    <label for="name">Your Name:</label>
+    <input type="text" id="name" />
+    <button onclick="submitName()">Submit</button>
+  </div>
+  <div id="chat-container" style="display: none;">
+    <label for="message">Message:</label>
+    <input type="text" id="message" />
+    <button onclick="sendMessage()">Send</button>
+    <button id="startRecordingButton">Start Recording</button>
+    <button id="stopRecordingButton">Stop Recording</button>
+    <span id="recordingDuration"></span>
+    <ul id="chat"></ul>
+  </div>
+
+  <script>
+    const socket = new WebSocket('ws://' + window.location.host);
+    let clientName;
+    const constraints = { audio: true };
+    let isRecording = false;
+    let recognition;
+    let startTime;
+
+    function submitName() {
+      const nameInput = document.getElementById('name');
+      clientName = nameInput.value.trim();
+
+      if (clientName !== '') {
+        document.getElementById('name-container').style.display = 'none';
+        document.getElementById('chat-container').style.display = 'block';
+        socket.send(clientName);
+      }
+    }
+
+    function sendMessage() {
+      const messageInput = document.getElementById('message');
+      const message = messageInput.value;
+      if (message.trim() !== '') {
+        socket.send(message);
+        messageInput.value = '';
+      }
+    }
+
+    function startRecording() {
+      if (!isRecording) {
+        isRecording = true;
+        startTime = Date.now();
+
+        recognition = new webkitSpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+
+        recognition.onresult = (event) => {
+    for (let i = event.resultIndex; i < event.results.length; ++i) {
+      if (event.results[i].isFinal) {
+        const audioBlob = new Blob([event.results[i][0].blob], { type: 'audio/wav' });
+        socket.send(JSON.stringify({ type: 'audio', data: audioBlob }));
+      }
+    }
+  };
+
+        recognition.start();
+
+        // Update recording duration every second
+        setInterval(() => {
+          if (isRecording) {
+            const elapsedSeconds = Math.floor((Date.now() - startTime) / 1000);
+            document.getElementById('recordingDuration').textContent = `Recording: ${elapsedSeconds} seconds`;
+          }
+        }, 1000);
+      }
+    }
+
+    function stopRecording() {
+      if (isRecording) {
+        isRecording = false;
+        recognition.stop();
+        document.getElementById('recordingDuration').textContent = '';
+
+        // Stop recording after a short delay to capture the last audio data
+        setTimeout(() => {
+          recognition.stop();
+        }, 500);
+      }
+    }
+
+    document.getElementById('startRecordingButton').addEventListener('click', startRecording);
+    document.getElementById('stopRecordingButton').addEventListener('click', stopRecording);
+
+    // WebSocket event listener for incoming messages
+    socket.addEventListener('message', (event) => {
+      const chat = document.getElementById('chat');
+      const li = document.createElement('li');
+
+      if (typeof event.data === 'string') {
+        const parts = event.data.split(':');
+        if (parts.length === 2) {
+          const nameSpan = document.createElement('span');
+          nameSpan.style.fontWeight = 'bold';
+          nameSpan.textContent = parts[0];
+
+          li.appendChild(nameSpan);
+          li.appendChild(document.createTextNode(`: ${parts[1]}`));
+        } else {
+          li.textContent = event.data;
+        }
+      } else if (event.data instanceof Blob) {
+        // Handle audio data
+        const audioUrl = URL.createObjectURL(event.data);
+        const audioElement = document.createElement('audio');
+        audioElement.controls = true;
+        audioElement.src = audioUrl;
+        li.appendChild(audioElement);
+      }
+
+      li.classList.add('message-container');
+      chat.appendChild(li);
+    });
+  </script>
+</body>
+</html>
